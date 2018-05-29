@@ -1,76 +1,75 @@
-pragma solidity ^0.4.22;
-
-contract OwnedToken {
-    // TokenCreator is a contract type that is defined below.
-    // It is fine to reference it as long as it is not used
-    // to create a new contract.
-    TokenCreator creator;
-    address owner;
-    bytes32 name;
-
-    // This is the constructor which registers the
-    // creator and the assigned name.
-    constructor(bytes32 _name) public {
-        // State variables are accessed via their name
-        // and not via e.g. this.owner. This also applies
-        // to functions and especially in the constructors,
-        // you can only call them like that ("internally"),
-        // because the contract itself does not exist yet.
-        owner = msg.sender;
-        // We do an explicit type conversion from `address`
-        // to `TokenCreator` and assume that the type of
-        // the calling contract is TokenCreator, there is
-        // no real way to check that.
-        creator = TokenCreator(msg.sender);
-        name = _name;
-    }
-
-    function changeName(bytes32 newName) public {
-        // Only the creator can alter the name --
-        // the comparison is possible since contracts
-        // are implicitly convertible to addresses.
-        if (msg.sender == address(creator))
-            name = newName;
-    }
-
-    function transfer(address newOwner) public {
-        // Only the current owner can transfer the token.
-        if (msg.sender != owner) return;
-        // We also want to ask the creator if the transfer
-        // is fine. Note that this calls a function of the
-        // contract defined below. If the call fails (e.g.
-        // due to out-of-gas), the execution here stops
-        // immediately.
-        if (creator.isTokenTransferOK(owner, newOwner))
-            owner = newOwner;
-    }
+/**
+ * This file has 2 contracts: tokenRecipient and MyToken
+ * and is reproduced directly from https://www.ethereum.org/token
+ */
+contract tokenRecipient { 
+    function receiveApproval(address _from, uint256 _value, address _token, bytes _extraData); 
 }
 
-contract TokenCreator {
-    function createToken(bytes32 name)
-       public
-       returns (OwnedToken tokenAddress)
-    {
-        // Create a new Token contract and return its address.
-        // From the JavaScript side, the return type is simply
-        // `address`, as this is the closest type available in
-        // the ABI.
-        return new OwnedToken(name);
+contract MyToken { 
+    /* Public variables of the token */
+    string public name;
+    string public symbol;
+    string public version;
+    uint8 public decimals;
+    uint256 public totalSupply;
+
+    /* This creates an array with all balances */
+    mapping (address => uint256) public balanceOf;
+    mapping (address => mapping (address => uint256)) public allowance;
+    mapping (address => mapping (address => uint256)) public spentAllowance;
+
+    /* This generates a public event on the blockchain that will notify clients */
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    /* Initializes contract with initial supply tokens to the creator of the contract */
+    function MyToken(
+        uint256 initialSupply, 
+        string tokenName, 
+        uint8 decimalUnits, 
+        string tokenSymbol, 
+        string versionOfTheCode
+        ) {
+        balanceOf[msg.sender] = initialSupply;              // Give the creator all initial tokens                    
+        totalSupply = initialSupply;                        // Update total supply
+        name = tokenName;                                   // Set the name for display purposes     
+        symbol = tokenSymbol;                               // Set the symbol for display purposes    
+        decimals = decimalUnits;                            // Amount of decimals for display purposes        
+        version = versionOfTheCode;
     }
 
-    function changeName(OwnedToken tokenAddress, bytes32 name)  public {
-        // Again, the external type of `tokenAddress` is
-        // simply `address`.
-        tokenAddress.changeName(name);
+    /* Send coins */
+    function transfer(address _to, uint256 _value) {
+        if (balanceOf[msg.sender] < _value) throw;           // Check if the sender has enough   
+        if (balanceOf[_to] + _value < balanceOf[_to]) throw; // Check for overflows
+        balanceOf[msg.sender] -= _value;                     // Subtract from the sender
+        balanceOf[_to] += _value;                            // Add the same to the recipient            
+        Transfer(msg.sender, _to, _value);                   // Notify anyone listening that this transfer took place
     }
 
-    function isTokenTransferOK(address currentOwner, address newOwner)
-        public
-        view
-        returns (bool ok)
-    {
-        // Check some arbitrary condition.
-        address tokenAddress = msg.sender;
-        return (keccak256(newOwner) & 0xff) == (bytes20(tokenAddress) & 0xff);
+    /* Allow another contract to spend some tokens in your behalf */
+    function approveAndCall(address _spender, uint256 _value, bytes _extraData) 
+        returns (bool success) {
+        allowance[msg.sender][_spender] = _value;     
+        tokenRecipient spender = tokenRecipient(_spender);
+        spender.receiveApproval(msg.sender, _value, this, _extraData); 
+        return true; 
     }
-}
+
+    /* A contract attempts to get the coins */
+    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
+        if (balanceOf[_from] < _value) throw;                 // Check if the sender has enough   
+        if (balanceOf[_to] + _value < balanceOf[_to]) throw;  // Check for overflows
+        if (spentAllowance[_from][msg.sender] + _value > allowance[_from][msg.sender]) throw;   // Check allowance
+        balanceOf[_from] -= _value;                          // Subtract from the sender
+        balanceOf[_to] += _value;                            // Add the same to the recipient            
+        spentAllowance[_from][msg.sender] += _value;
+        Transfer(_from, _to, _value); 
+        return true;
+    } 
+
+    /* This unnamed function is called whenever someone tries to send ether to it */
+    function () {
+        throw;     // Prevents accidental sending of ether
+    }        
+}     
